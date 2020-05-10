@@ -8,6 +8,7 @@ from protosearch.build_bulk.classification import PrototypeClassification
 from .calculator import get_calculator
 from .vasp import get_poscar_from_atoms
 
+
 def get_submitter(cluster):
     if cluster == 'tri':
         return TriSubmit
@@ -168,7 +169,7 @@ class TriSubmit(Submit):
                          calc_parameters)
 
         if ncpus is None:
-            ncpus = 4 #get_ncpus_from_volume(atoms)
+            ncpus = 4  # get_ncpus_from_volume(atoms)
 
         self.ncpus = ncpus
         self.queue = queue
@@ -186,6 +187,83 @@ class TriSubmit(Submit):
 
         command = shlex.split('trisub -q {} -c {}'.format(
             self.queue, self.ncpus))
+        subprocess.call(command, cwd=self.excpath)
+
+
+class SlurmSubmit(Submit):
+    """
+    WIP!
+
+    Set up VASP calculations on SLURM cluster
+
+    atoms: ASE Atoms object
+    calc_parameters: dict
+        Optional specification of parameters, such as {ecut: 300}.
+        If not specified, the parameter standards given in
+        ./utils/standards.py will be applied
+    partition: SLURM partition
+    qos: quality of service SLURM option
+    nodes: SLURM node allocation
+    ntasks: number of processes per node
+    time: SLURM job time allocation
+    basepath: str
+        Path to your root project directory for running calculations
+        defaults to $SCRATCH/protosearch
+    """
+
+    def __init__(self,
+                 atoms,
+                 partition,
+                 nodes,
+                 ntasks,
+                 submit_command='sbatch',
+                 time='1.00.00',
+                 basepath='$SCRATCH/protosearch',
+                 calc_parameters=None,
+                 account=None
+                 qos=None,
+                 node_const=None
+                 ):
+
+        super().__init__(atoms,
+                         basepath,
+                         calc_parameters)
+
+        self.name = atoms.get_chemical_formula()
+        self.submit_command = submit_command
+        self.qos = qos
+        self.node_const = node_const
+        self.partition = partition
+        self.time = time
+        self.account = account
+        self.nodes = nodes
+        self.ntasks = ntasks
+
+    def submit_calculation(self):
+        """Submit calculation for structure
+        First the execution path is set, then the initial POSCAR and models.py
+        are written to the directory.
+        """
+
+        self.set_execution_path(strict_format=False)
+        self.write_submission_files()
+
+        command = self.submit_command
+        command += ' -J {} -N {} -n {} -p {} -t {}'.format(self.name,
+                                                           self.nodes,
+                                                           self.ntasks,
+                                                           self.partition,
+                                                           self.time)
+        if self.account:
+            command += ' -A {}'.format(self.account)
+        if self.qos:
+            command += ' -q {}'.format(self.qos)
+        if self.node_constr:
+            command += ' -C {}'.format(self.node_constr)
+
+        command += ' model.py'
+        command = shlex.split('command')
+
         subprocess.call(command, cwd=self.excpath)
 
 
@@ -268,50 +346,28 @@ def get_ncpus_from_volume(atoms):
     return max(ncpus, 1)
 
 
-def get_nersc_submit_script(self,
+def get_slurm_submit_header(self,
                             excpath,
                             account,
-                            qos='premium',
-                            partition='regular',
-                            time='1:00:00',
-                            nodes=10,
-                            ntasks=66):
-    """Write SLURM submit script for NERSC. Takes regular SLURM parameters
-    qos (debug, scavenger, premium)
+                            partition,
+                            nodes,
+                            ntasks,
+                            qos='regular',
+                            time='1:00:00'):
+    """Write SLURM submit script. Takes regular SLURM parameters
+    qos (regular, debug, scavenger, premium)
     partition (regular, scavenger)
     """
 
-    script = '#!/bin/bash\n'
-    script += '#SBATCH -q {}\n'.format(qos)
+    script = '#!/usr/bin/python\n'
     script += '#SBATCH -p {}\n'.format(partition)
+    script += '#SBATCH --exclusive'
+    script += '#SBATCH -q {}\n'.format(qos)
     script += '#SBATCH -t {}\n'.format(time)
     script += '#SBATCH -A {}\n'.format(account)
     script += '#SBATCH -e error.txt\n'
     script += '#SBATCH -o output.txt\n'
     script += '#SBATCH -C knl\n'
     script += '#SBATCH --ntasks-per-node={}\n'.format(ntasks)
-
-    script += """
-module load python/3.7-anaconda-2019.07
-export PYTHONPATH=$HOME/.local/cori/3.7-anaconda-2019.07/lib/python3.7/site-packages:$PYTHONPATH
-module load vasp-tpc/5.4.4-knl
-
-#cd {excpath}
-export VASP_SCRIPT=./run_vasp.py
-export VASP_PP_PATH=/project/projectdirs/{account}/vasp-psp/pseudo52
-
-export OMP_NUM_THREADS=1
-export OMP_PLACES=threads
-export OMP_PROC_BIND=spread
-""".format(excpath=excpath, account=account)
-
-    script += """
-echo "import os" > run_vasp.py
-echo "exitcode = os.system('srun -n {nproc} -c 4 --cpu_bind=cores vasp_std')" >> run_vasp.py
-
-echo $VASP_SCRIPT
-echo $VASP_PP_PATH
-
-python {excpath}/model.py""".format(nproc=nodes * ntasks, excpath=excpath)
 
     return script
