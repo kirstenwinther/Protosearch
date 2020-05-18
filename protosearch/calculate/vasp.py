@@ -58,17 +58,17 @@ class VaspModel:
     def get_parameter_dict(self):
         return self.calc_parameters
 
-    def get_model(self):
+    def get_model(self, asevasp='Vasp2'):
         """
         Construct model string, which uses the ASE interface
         to Vasp.
         """
 
-        modelstr = get_model_header()
+        modelstr = get_model_header(asevasp=asevasp)
         if self.initial_magmoms:
             modelstr = self.add_initial_magmoms(modelstr)
 
-        modelstr += 'calc = Vasp(\n'
+        modelstr += 'calc = {}(\n'.format(asevasp)
 
         if self.setups:
             modelstr += '    setups={'
@@ -145,16 +145,17 @@ def get_poscar_from_atoms(atoms):
     return poscar.getvalue()
 
 
-def get_model_header():
+def get_model_header(asevasp='Vasp2'):
     modelstr = \
         """#!/usr/bin/env python
+
 import os
 import numpy as np
 from ase.io import read
-from ase.calculators.vasp import Vasp
+from ase.calculators.vasp import {}
 
 atoms = read('initial.POSCAR')
-"""
+""".format(asevasp)
     return modelstr
 
 

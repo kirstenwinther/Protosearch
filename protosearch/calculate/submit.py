@@ -1,6 +1,8 @@
 import os
 import shlex
 import subprocess
+import json
+
 from ase.io import write
 
 from protosearch.utils import get_tri_basepath
@@ -9,11 +11,9 @@ from .calculator import get_calculator
 from .vasp import get_poscar_from_atoms
 
 
-def get_submitter(cluster):
+def get_submitter(cluster='tri'):
     if cluster == 'tri':
-        return TriSubmit
-    elif cluster == 'nersc':
-        return NerscSubmit
+        return TriSubmit()
 
 
 class Submit:
@@ -23,13 +23,13 @@ class Submit:
     """
 
     def __init__(self,
-                 atoms,
                  basepath,
-                 calc_parameters=None,
                  ):
+        self.basepath = basepath
+        self.calculator = 'vasp'
 
+    def set_atoms(self, atoms):
         self.atoms = atoms
-
         PC = PrototypeClassification(self.atoms)
         prototype, cell_parameters = PC.get_classification()
 
@@ -46,14 +46,10 @@ class Submit:
             self.cell_value_list += [cell_parameters[param]]
             self.cell_param_list += [param]
 
-        self.basepath = basepath
-        self.calculator = 'vasp'
-        self.master_parameters = calc_parameters
-
-    def write_submission_files(self):
+    def write_submission_files(self, master_parameters=None):
         self.write_poscar(self.excpath)
-        self.write_model(self.excpath)
-        # self.write_parameters(self.excpath)
+        self.write_model(self.excpath,
+                         master_parameters=master_parameters)
 
     def write_poscar(self, filepath):
         """Write POSCAR to specified file"""
@@ -96,19 +92,15 @@ class Submit:
         self.excpath = '{}/_{}'.format(self.excroot, calc_revision)
         os.mkdir(self.excpath)
 
-    def get_calculator(self):
-        symbols = self.atoms.symbols
-        Calculator = get_calculator(self.calculator)
-        return Calculator(symbols,
-                          self.master_parameters,
-                          # self.ncpus
-                          )
-
-    def write_model(self, filepath):
+    def write_model(self, filepath, master_parameters=None):
         """ Write model.py"""
-        import json
-        calculator = self.get_calculator()
-        modelstr = calculator.get_model()
+        Calculator = get_calculator(self.calculator)
+        symbols = self.atoms.symbols
+        calculator = Calculator(symbols,
+                                master_parameters)
+
+        modelstr = calculator.get_model(asevasp=self.asevasp)
+
         parameters = calculator.calc_parameters
 
         with open(filepath + '/model.py', 'w') as f:
@@ -129,7 +121,6 @@ class TriSubmit(Submit):
 
     Parameters:
 
-    atoms: ASE Atoms object
     calc_parameters: dict
         Optional specification of parameters, such as {ecut: 300}.
         If not specified, the parameter standards given in
@@ -151,7 +142,6 @@ class TriSubmit(Submit):
     """
 
     def __init__(self,
-                 atoms,
                  calc_parameters=None,
                  ncpus=4,
                  queue='medium',
@@ -164,30 +154,32 @@ class TriSubmit(Submit):
             basepath = get_tri_basepath(calculator=calculator,
                                         ext=basepath_ext)
 
-        super().__init__(atoms,
-                         basepath,
-                         calc_parameters)
+        super().__init__(basepath)
 
         if ncpus is None:
             ncpus = 4  # get_ncpus_from_volume(atoms)
 
         self.ncpus = ncpus
         self.queue = queue
+        self.asevasp = 'Vasp'
 
-    def submit_calculation(self):
+    def submit_calculation(self, atoms, ncpu_scale=None, master_parameters=None):
         """Submit calculation for unique structure.
         First the execution path is set, then the initial POSCAR and models.py
         are written to the directory.
 
         The calculation is submitted as a regular model with trisub.
         """
-
+        self.set_atoms(atoms)
         self.set_execution_path()
-        self.write_submission_files()
+
+        self.write_submission_files(master_parameters=master_parameters)
 
         command = shlex.split('trisub -q {} -c {}'.format(
             self.queue, self.ncpus))
         subprocess.call(command, cwd=self.excpath)
+
+        return self.excpath
 
 
 class SlurmSubmit(Submit):
@@ -212,7 +204,6 @@ class SlurmSubmit(Submit):
     """
 
     def __init__(self,
-                 atoms,
                  partition,
                  nodes,
                  ntasks,
@@ -220,37 +211,40 @@ class SlurmSubmit(Submit):
                  time='1.00.00',
                  basepath='$SCRATCH/protosearch',
                  calc_parameters=None,
-                 account=None
+                 account=None,
                  qos=None,
-                 node_const=None
-                 ):
+                 node_type=None):
 
-        super().__init__(atoms,
-                         basepath,
-                         calc_parameters)
+        super().__init__(basepath)
 
-        self.name = atoms.get_chemical_formula()
         self.submit_command = submit_command
         self.qos = qos
-        self.node_const = node_const
+        self.node_type = node_type
         self.partition = partition
         self.time = time
         self.account = account
         self.nodes = nodes
         self.ntasks = ntasks
+        self.asevasp = 'Vasp2'
 
-    def submit_calculation(self):
+    def submit_calculation(self, atoms, node_scale=1, master_parameters=None):
         """Submit calculation for structure
         First the execution path is set, then the initial POSCAR and models.py
         are written to the directory.
         """
 
+        self.set_atoms(atoms)
+
+        self.name = '{}_{}'.format(atoms.get_chemical_formula(),
+                                   self.spacegroup)
+
         self.set_execution_path(strict_format=False)
-        self.write_submission_files()
+
+        self.write_submission_files(master_parameters=master_parameters)
 
         command = self.submit_command
         command += ' -J {} -N {} -n {} -p {} -t {}'.format(self.name,
-                                                           self.nodes,
+                                                           self.nodes * node_scale,
                                                            self.ntasks,
                                                            self.partition,
                                                            self.time)
@@ -258,13 +252,37 @@ class SlurmSubmit(Submit):
             command += ' -A {}'.format(self.account)
         if self.qos:
             command += ' -q {}'.format(self.qos)
-        if self.node_constr:
-            command += ' -C {}'.format(self.node_constr)
+        if self.node_type:
+            command += ' -C {}'.format(self.node_type)
 
         command += ' model.py'
         command = shlex.split('command')
 
         subprocess.call(command, cwd=self.excpath)
+
+        return self.excpath
+
+    def get_slurm_submit_header(self):
+        """Write SLURM submit script. Takes regular SLURM parameters
+        qos (regular, debug, scavenger, premium)
+        partition (regular, scavenger)
+        """
+
+        script = '#!/usr/bin/python\n\n'
+        script += '#SBATCH -J {}\n'.format(self.job_name)
+        script += '#SBATCH -p {}\n'.format(self.partition)
+        script += '#SBATCH -N {}\n'.format(self.nodes)
+        script += '#SBATCH --n={}\n\n'.format(self.ntasks)
+        script += '#SBATCH --exclusive \n'
+        script += '#SBATCH -t {}\n'.format(self.time)
+        if self.account is not None:
+            script += '#SBATCH -A {}\n'.format(self.account)
+        if self.qos is not None:
+            script += '#SBATCH -q {}\n'.format(self.qos)
+        if self.node_type is not None:
+            script += '#SBATCH -C {}\n'.format(self.node_type)
+
+        return script
 
 
 class NerscSubmit(Submit):
@@ -323,10 +341,12 @@ class NerscSubmit(Submit):
 
         self.set_execution_path(strict_format=False)
         self.write_submission_files()
-        self.write_submit_script()
+        # self.write_submit_script()
 
         command = shlex.split('sh submit.sh')
         subprocess.call(command, cwd=self.excpath)
+
+        return self.excpath
 
     def write_submit_script(self):
         script = get_nersc_submit_script(self,
@@ -344,30 +364,3 @@ class NerscSubmit(Submit):
 def get_ncpus_from_volume(atoms):
     ncpus = int((atoms.get_volume() / 20 // 4) * 4)
     return max(ncpus, 1)
-
-
-def get_slurm_submit_header(self,
-                            excpath,
-                            account,
-                            partition,
-                            nodes,
-                            ntasks,
-                            qos='regular',
-                            time='1:00:00'):
-    """Write SLURM submit script. Takes regular SLURM parameters
-    qos (regular, debug, scavenger, premium)
-    partition (regular, scavenger)
-    """
-
-    script = '#!/usr/bin/python\n'
-    script += '#SBATCH -p {}\n'.format(partition)
-    script += '#SBATCH --exclusive'
-    script += '#SBATCH -q {}\n'.format(qos)
-    script += '#SBATCH -t {}\n'.format(time)
-    script += '#SBATCH -A {}\n'.format(account)
-    script += '#SBATCH -e error.txt\n'
-    script += '#SBATCH -o output.txt\n'
-    script += '#SBATCH -C knl\n'
-    script += '#SBATCH --ntasks-per-node={}\n'.format(ntasks)
-
-    return script

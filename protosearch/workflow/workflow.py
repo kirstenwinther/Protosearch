@@ -27,20 +27,22 @@ class Workflow(PrototypeSQL):
 
     db_filename: str
        full path to db file to save calculations
-    cluster: str
-       Currently only 'tri' is working
+    Submitter: protosearch.submit.SubmitClass object
+       SlurmSubmit() or TriSubmit() class
+
     """
+
     def __init__(self,
                  db_filename,
+                 Submitter=None,
                  calculator='vasp',
-                 cluster='tri',
                  verbose=False):
 
         self.verbose = verbose
 
         super().__init__(filename=db_filename)
 
-        self.Submitter = get_submitter(cluster)
+        self.Submitter = Submitter or get_submitter()
 
         self.collected = False
 
@@ -55,16 +57,16 @@ class Workflow(PrototypeSQL):
 
         self.collected = True
 
-    def submit_atoms_batch(self, atoms_list, ncpus=None, calc_parameters=None,
+    def submit_atoms_batch(self, atoms_list, calc_parameters=None,
                            **kwargs):
         """Submit a batch of calculations. Takes a list of atoms
         objects as input"""
         batch_no = self.get_next_batch_no()
         for atoms in atoms_list:
-            self.submit_atoms(atoms, ncpus, batch_no,
+            self.submit_atoms(atoms, batch_no,
                               calc_parameters, **kwargs)
 
-    def submit_atoms(self, atoms, ncpus=None, batch_no=None,
+    def submit_atoms(self, atoms, batch_no=None,
                      calc_parameters=None, **kwargs):
         """Submit a calculation for an atoms object"""
         PC = PrototypeClassification(atoms)
@@ -74,18 +76,16 @@ class Workflow(PrototypeSQL):
                               p_name=prototype['p_name']):
             return
 
-        Sub = self.Submitter(atoms=atoms,
-                             ncpus=ncpus,
-                             calc_parameters=calc_parameters)
-
-        Sub.submit_calculation()
+        path = self.Submitter.\
+            submit_calculation(atoms,
+                               master_parameters=calc_parameters)
 
         key_value_pairs = {'p_name': prototype['p_name'],
-                           'path': Sub.excpath,
+                           'path': path,
                            'spacegroup': prototype['spacegroup'],
                            'wyckoffs': json.dumps(prototype['wyckoffs']),
                            'species': json.dumps(prototype['species']),
-                           'ncpus': Sub.ncpus}
+                           }
 
         key_value_pairs.update(kwargs)
 
@@ -94,16 +94,16 @@ class Workflow(PrototypeSQL):
 
         self.write_submission(key_value_pairs)
 
-    def submit_batch(self, prototypes, ncpus=None,
+    def submit_batch(self, prototypes,
                      calc_parameters=None, **kwargs):
         """Submit a batch of calculations. Takes a list of prototype
         dicts as input"""
         batch_no = self.get_next_batch_no()
         for prototype in prototypes:
-            self.submit(prototype, ncpus, batch_no, calc_parameters, **kwargs)
+            self.submit(prototype, batch_no, calc_parameters, **kwargs)
         self.write_status(last_batch_no=batch_no)
 
-    def submit(self, prototype, ncpus=None, batch_no=None, calc_parameters=None,
+    def submit(self, prototype, batch_no=None, calc_parameters=None,
                **kwargs):
         """Submit a calculation for a prototype, generating atoms
         with build_bulk and enumerator"""
@@ -118,18 +118,16 @@ class Workflow(PrototypeSQL):
         p_name = BB.get_prototype_name(prototype['species'])
         formula = atoms.get_chemical_formula()
 
-        Sub = self.Submitter(atoms=atoms,
-                             ncpus=ncpus,
-                             calc_parameters=calc_parameters)
-
-        Sub.submit_calculation()
+        path = self.Submitter\
+                   .submit_calculation(atoms,
+                                       master_parameters=calc_parameters)
 
         key_value_pairs = {'p_name': p_name,
-                           'path': Sub.excpath,
+                           'path': path,
                            'spacegroup': BB.spacegroup,
                            'wyckoffs': json.dumps(BB.wyckoffs),
                            'species': json.dumps(BB.species),
-                           'ncpus': Sub.ncpus}
+                           }
 
         key_value_pairs.update(kwargs)
 
@@ -154,23 +152,25 @@ class Workflow(PrototypeSQL):
         for prototype in prototypes:
             self.submit(prototype)
 
-    def submit_id_batch(self, calc_ids, ncpus=None,
+    def submit_id_batch(self, calc_ids,
                         calc_parameters=None, **kwargs):
         """Submit a batch of calculations. Takes a list of atoms
         objects db ids as input"""
         batch_no = self.get_next_batch_no()
         for calc_id in calc_ids:
-            self.submit_id(calc_id, ncpus, batch_no, calc_parameters)
+            self.submit_id(calc_id, batch_no, calc_parameters)
         self.write_status(last_batch_no=batch_no)
 
-    def submit_id(self, calc_id, ncpus=None, batch_no=None,
-                  calc_parameters=None, **kwargs):
+    def submit_id(self,
+                  calc_id,
+                  batch_no=None,
+                  calc_parameters=None,
+                  **kwargs):
         """
         Submit an atomic structure by id
         """
         row = self.ase_db.get(id=int(calc_id))
         atoms = row.toatoms()
-
         formula = row.formula
         p_name = row.p_name
 
@@ -178,14 +178,13 @@ class Workflow(PrototypeSQL):
                               p_name=p_name):
             return
 
-        Sub = self.Submitter(atoms=atoms,
-                             ncpus=ncpus,
-                             calc_parameters=calc_parameters)
-        Sub.submit_calculation()
+        path = self.Submitter.\
+            submit_calculation(atoms,
+                               master_parameters=calc_parameters)
 
-        key_value_pairs = {'path': Sub.excpath,
+        key_value_pairs = {'path': path,
                            'submitted': 1,
-                           'ncpus': Sub.ncpus}
+                           }
 
         if batch_no is not None:
             key_value_pairs.update({'batch': batch_no})
@@ -356,9 +355,9 @@ class Workflow(PrototypeSQL):
                 else:
                     print('Job not resubmitted: {}'.format(fail_reason))
                 continue
-            ncpus = None
-            if fail_reason == 'ncpus':
-                ncpus = d.get('ncpus', 1) * 2
+            #ncpus = None
+            # if fail_reason == 'ncpus':
+            #    ncpus = d.get('ncpus', 1) * 2
             elif fail_reason == 'ase read':
                 atoms = read(d.runpath + '/OUTCAR.relax')
                 self.ase_db.update(id=d.id, atoms=atoms)
@@ -372,7 +371,7 @@ class Workflow(PrototypeSQL):
             if fail_reason == 'Symmetry error':
                 calc_parameters.update({'kgamma': True})
             self.submit_id(d.id,
-                           ncpus=ncpus,
+                           # ncpus=ncpus,
                            calc_parameters=calc_parameters)
 
             rerun = (d.get('rerun') or 0) + 1
@@ -436,8 +435,10 @@ class DummyWorkflow(Workflow):
         # print("Not actually calling trisync here")
         return(None)
 
-    def submit_id(self, calc_id, ncpus=None,
-                  batch_no=None, calc_parameters=None):
+    def submit_id(self,
+                  calc_id,
+                  batch_no=None,
+                  calc_parameters=None):
         """
         Submit an atomic structure by id
         """
