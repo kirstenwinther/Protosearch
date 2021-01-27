@@ -5,11 +5,16 @@ from ase.geometry import get_distances, cell_to_cellpar
 from ase.data import atomic_numbers as a_n
 from ase.data import covalent_radii as cradii
 from ase.spacegroup import crystal
+from pyswarms.single.general_optimizer import GeneralOptimizerPSO
+from pyswarms.backend.topology import Ring  # , Pyramid, VonNeumann
+
 
 from protosearch.ml_modelling.regression_model import get_regression_model
 from protosearch.ml_modelling.fingerprint import clean_features
 from .wyckoff_symmetries import WyckoffSymmetries
-from .fitness_function import get_fitness, get_connections
+from .loss_function import get_loss
+from .connectivity_tools import get_connections
+
 
 class CellParameters(WyckoffSymmetries):
     """
@@ -23,13 +28,20 @@ class CellParameters(WyckoffSymmetries):
        wyckoff positions, for example ['a', 'a', 'b', 'c']
     species: list
        atomic species, for example ['Fe', 'O', 'O', 'O']
+    loss_function: function
+       Loss function for wyckoff optimization that takes ase atoms object
+       as input and return a loss function. The function should vary smoothly
+       with changes in atomic structure. Default loss function is the Ewald energy
+       for metal oxides and flourides, and unit cell volume otherwise.
     """
 
     def __init__(self,
                  spacegroup=1,
                  wyckoffs=None,
                  species=None,
-                 verbose=True
+                 verbose=True,
+                 loss_function=None
+
                  ):
 
         super().__init__(spacegroup=spacegroup,
@@ -38,6 +50,9 @@ class CellParameters(WyckoffSymmetries):
         self.spacegroup = spacegroup
         self.wyckoffs = wyckoffs
         self.species = species
+        if loss_function is None:
+            loss_function = get_loss
+        self.loss_function = loss_function
 
         self.set_lattice_dof()
         if self.wyckoffs is not None:
@@ -172,12 +187,13 @@ class CellParameters(WyckoffSymmetries):
                 print('Fitness iterations:')
 
             atoms_list = \
-                self.run_ml_ga_optimization(
+                self.run_swarm_optimization(  # run_ml_ga_optimization(
                     master_parameters=master_parameters,
                     optimize_lattice=optimize_lattice,
                     optimize_angles=optimize_angles,
                     optimize_wyckoffs=optimize_wyckoffs,
-                    max_candidates=max_candidates)
+                    max_candidates=max_candidates,
+                    proximity=proximity)
 
             for atoms in atoms_list:
                 opt_parameters = \
@@ -204,7 +220,6 @@ class CellParameters(WyckoffSymmetries):
         else:
             opt_cell_parameters = cell_parameters_list
             opt_atoms_list = atoms_list
-
         return opt_cell_parameters
 
     def crossover(self, population, n_per_couple=10, n_children=None):
@@ -250,13 +265,98 @@ class CellParameters(WyckoffSymmetries):
         shuffle(mutated)
         return mutated[:n]
 
+    def run_swarm_optimization(self,
+                               master_parameters=None,
+                               optimize_lattice=True,
+                               optimize_angles=True,
+                               optimize_wyckoffs=True,
+                               max_candidates=1,
+                               proximity=0.95,
+                               niter=10,
+                               c1=0.5,
+                               c2=0.5,
+                               w=0.2,
+                               p=2):
+
+        cell_parameters = self.initial_guess()
+        if master_parameters:
+            cell_parameters.update(master_parameters)
+
+        population = []
+
+        feature_variables = list(self.coor_variables)
+
+        if optimize_angles:
+            feature_variables += list(self.angle_variables)
+
+        n_parameters = len(feature_variables)
+
+        n_particles = 4 * n_parameters
+
+        bounds = (np.zeros([n_parameters]), np.ones([n_parameters]))
+
+        options = {'c1': c1,
+                   'c2': c2,
+                   'w': w,
+                   'k': n_parameters,
+                   'p': p,
+                   'r': 1}
+
+        if optimize_angles:
+            n_ang = len(self.angle_variables)
+            bounds[0][-n_ang:] = 55
+            bounds[1][-n_ang:] = 125
+
+        def get_loss_for_param(*args):
+            coor = {}
+            loss_list = []
+
+            for n in range(n_particles):
+                for i in range(n_parameters):
+                    coor[feature_variables[i]] = args[0][n, i]
+
+                cell_parameters.update(coor)
+
+                atoms = self.construct_atoms(cell_parameters)
+
+                atoms = self.optimize_lattice_constants(atoms,
+                                                        proximity=proximity,
+                                                        optimize_wyckoffs=False)
+                if atoms is None:
+                    loss = 0
+                else:
+                    loss = self.loss_function(atoms)
+                    loss_list += [loss]
+
+            return np.array(loss_list)
+
+        optimizer = GeneralOptimizerPSO(n_particles=n_particles,
+                                        dimensions=n_parameters,
+                                        #velocity_clamp=(0.01, 10),
+                                        options=options, bounds=bounds,
+                                        topology=Ring())
+
+        stats = optimizer.optimize(get_loss_for_param, iters=niter)
+
+        coor = {}
+        coor[feature_variables[0]] = stats[1][0]
+        cell_parameters.update(coor)
+
+        atoms = self.construct_atoms(cell_parameters)
+
+        atoms = self.optimize_lattice_constants(atoms,
+                                                proximity=proximity,
+                                                optimize_wyckoffs=False)
+
+        return [atoms]
+
     def run_ml_ga_optimization(self,
                                master_parameters=None,
                                optimize_lattice=True,
                                optimize_angles=True,
                                optimize_wyckoffs=True,
                                use_fitness_sharing=False,
-                               batch_size=6,
+                               batch_size=10,
                                max_candidates=1,
                                debug=False):
         """
@@ -315,7 +415,7 @@ class CellParameters(WyckoffSymmetries):
 
         train_features = None
 
-        fitness = np.array([])
+        loss = np.array([])
         all_structures = []
 
         converged = False
@@ -329,7 +429,7 @@ class CellParameters(WyckoffSymmetries):
                 cell_parameters.update(pop)
                 atoms = self.construct_atoms(cell_parameters)
                 atoms = self.optimize_lattice_constants(atoms,
-                                                        proximity=0.9,
+                                                        proximity=proximity,
                                                         optimize_wyckoffs=False)
                 if atoms is None:
                     bad_indices += [i]
@@ -347,21 +447,21 @@ class CellParameters(WyckoffSymmetries):
                     atoms = self.construct_atoms(cell_parameters,
                                                  primitive_cell=True)
 
-                fit = get_fitness(atoms)
+                fit = get_loss(atoms)
 
                 connections = None
                 if fit > -2:
                     connections = get_connections(atoms, decimals=1)
 
-                fitness = np.append(fitness, fit)
+                loss = np.append(loss, fit)
                 all_structures += [{'parameters': cell_parameters,
                                     'atoms': atoms.copy(),
-                                    'fitness': fit,
+                                    'loss': fit,
                                     'graph': connections}]
 
-            best_fitness = np.max(fitness)
+            best_loss = np.max(loss)
             if self.verbose:
-                print('  {}'.format(np.max(fitness).round(2)))
+                print('  {}'.format(np.max(loss).round(2)))
             batch_indices = [idx for idx in batch_indices if not idx
                              in bad_indices]
             if train_features is None:
@@ -376,7 +476,7 @@ class CellParameters(WyckoffSymmetries):
 
             population = np.delete(population, batch_indices, axis=0)
 
-            indices = np.argsort(fitness)[::-1]
+            indices = np.argsort(loss)[::-1]
             ga_survived = np.array(train_population)[indices][:10]
             new_population = self.crossover(ga_survived, n_children=50) + \
                 self.mutation(ga_survived, n_children=10)
@@ -394,7 +494,7 @@ class CellParameters(WyckoffSymmetries):
                 clean_features({'train': train_features,
                                 'test': test_features})
 
-            fitness = np.delete(fitness, bad_indices['train'])
+            loss = np.delete(loss, bad_indices['train'])
             test_features = np.delete(test_features, bad_indices['test'],
                                       axis=0)
             train_features = np.delete(train_features, bad_indices['train'],
@@ -404,7 +504,7 @@ class CellParameters(WyckoffSymmetries):
             try:
                 Model = get_regression_model('catlearn')(
                     features['train'],
-                    np.array(fitness),
+                    np.array(loss),
                     optimize_hyperparameters=True,
                     kernel_width=1,
                     #bounds=((0.5, 5),)
@@ -412,7 +512,7 @@ class CellParameters(WyckoffSymmetries):
             except:
                 Model = get_regression_model('catlearn')(
                     features['train'],
-                    np.array(fitness),
+                    np.array(loss),
                     optimize_hyperparameters=False,
                     kernel_width=3)
 
@@ -444,27 +544,27 @@ class CellParameters(WyckoffSymmetries):
                 p.plot(range(len(predictions)),
                        predictions[idx] + unc[idx], '--')
                 p.plot(range(len(predictions)),
-                       predictions[idx] * 0 + best_fitness, '--')
+                       predictions[idx] * 0 + best_loss, '--')
                 p.show()
 
             if iter_id > 30 or len(predictions) < 7:
                 converged = True
-            elif not np.max(AQU1) > best_fitness and iter_id > 5:
+            elif not np.max(AQU1) > best_loss and iter_id > 5:
                 converged = True
-            # elif best_fitness > 0.95:
+            # elif best_loss > 0.95:
             #    converged = True
 
-        indices = np.argsort(fitness)[::-1][:max_candidates]
-        fitness = fitness[indices]
+        indices = np.argsort(loss)[::-1][:max_candidates]
+        loss = loss[indices]
 
         all_structures = np.array(all_structures)[indices]
         all_graphs = np.array([s['graph'] for s in all_structures])
-        f_max = max(fitness)
+        f_max = max(loss)
 
-        if fitness[0] < 0.8:
+        if loss[0] < 0.8:
             indices = [0]
         else:
-            indices = [i for i, f in enumerate(fitness) if
+            indices = [i for i, f in enumerate(loss) if
                        f > 0.8 * f_max and not
                        np.any(all_graphs[i] in all_graphs[:i])
                        ]
@@ -528,9 +628,8 @@ class CellParameters(WyckoffSymmetries):
         #        return None
         return atoms
 
-    """
     def check_prototype(self, atoms):
-        #Check that spacegroup and wyckoff positions did not change
+        # Check that spacegroup and wyckoff positions did not change
 
         PC = PrototypeClassification(atoms)
 
@@ -546,7 +645,6 @@ class CellParameters(WyckoffSymmetries):
             return False
         else:
             return True
-    """
 
     def optimize_lattice_constants(self,
                                    atoms,
