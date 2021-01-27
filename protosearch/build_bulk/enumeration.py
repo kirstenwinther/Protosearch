@@ -149,9 +149,11 @@ class AtomsEnumeration():
     def __init__(self,
                  elements,
                  max_atoms=None,
+                 max_wyckoffs=None,
                  spacegroups=None):
         self.elements = elements
         self.max_atoms = max_atoms
+        self.max_wyckoffs = max_wyckoffs
         self.spacegroups = spacegroups or list(range(1, 231))
 
         for key, value in self.elements.items():
@@ -165,6 +167,7 @@ class AtomsEnumeration():
         N0 = DB.ase_db.count()
 
         prototypes = DB.select(max_atoms=self.max_atoms,
+                               max_wyckoffs=self.max_wyckoffs,
                                spacegroups=self.spacegroups,
                                source='prototype')
         Nprot = len(prototypes)
@@ -208,10 +211,22 @@ class AtomsEnumeration():
         cell_parameters = prototype.get('cell_parameters', None)
         if cell_parameters:
             cell_parameters = json.load(cell_parameters)
+
+        structure_names = []
         for species in species_lists:
             structure_name = str(prototype['spacegroup'])
+            structure_name_list = []
             for spec, wy_spec in zip(species, prototype['wyckoffs']):
-                structure_name += '_{}_{}'.format(spec, wy_spec)
+                structure_name_list += ['{}_{}'.format(spec, wy_spec)]
+
+            structure_name_w = '_'.join(sorted(structure_name_list))
+            if structure_name_w in structure_names:
+                continue
+            else:
+                structure_names += [structure_name_w]
+
+            # {}_{}'.format(spec, wy_spec)
+            structure_name += '_' + structure_name_w
             with PrototypeSQL(filename=self.filename) as DB:
                 if DB.ase_db.count(structure_name=structure_name) > 0:
                     continue
@@ -224,7 +239,7 @@ class AtomsEnumeration():
                            species,
                            )
             atoms_list, parameters = \
-                BB.get_wyckoff_candidate_atoms(proximity=1,
+                BB.get_wyckoff_candidate_atoms(proximity=0.9,
                                                primitive_cell=True,
                                                return_parameters=True,
                                                max_candidates=max_candidates)
