@@ -1,6 +1,5 @@
 from shapely.geometry import Polygon
 
-
 def expand_cell(atoms, cutoff=None, padding=None):
     """
     Copy from Catkit connectivity utils (written by Jacob Boes)
@@ -282,3 +281,40 @@ def get_weighted_area(vertices, d):
     area /= weight
 
     return area
+
+
+def get_connections(atoms, decimals=1):
+
+    connectivity = get_area_neighbors()  # get_cutoff_neighbors(atoms)
+
+    atoms_connections = {}
+
+    for i in range(len(atoms)):
+        for j in range(len(atoms)):
+            symbols = '-'.join(sorted([atoms[i].symbol, atoms[j].symbol]))
+            if not symbols in atoms_connections:
+                atoms_connections[symbols] = [0 for n in range(len(atoms))]
+
+            if not atoms[i].symbol == atoms[j].symbol:
+                idx = np.argsort([atoms[i].symbol, atoms[j].symbol])
+                k = [i, j][idx[-1]]
+            else:
+                k = i
+
+            if not connectivity[i][j]:
+                continue
+            atoms_connections[symbols][k] += \
+                connectivity[i][j] / 2
+
+    final_connections = {}
+    for key, value in atoms_connections.items():
+        value = [v for v in value if v > 0]
+        if len(value) > 0:
+            m = np.mean(value)
+            std = np.std(value)
+        else:
+            m = 0
+            std = 0
+        final_connections[key + '_mean'] = np.round(m, decimals)
+        final_connections[key + '_std'] = np.round(std, decimals)
+    return final_connections
