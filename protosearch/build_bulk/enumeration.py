@@ -195,7 +195,7 @@ class AtomsEnumeration():
             for prototype in prototypes:
                 self.store_atoms_for_prototype(prototype)
 
-    def store_atoms_for_prototype(self, prototype, max_candidates=1):
+    def store_atoms_for_prototype(self, prototype, max_candidates=1, loss_function=None):
 
         p_name = prototype['name']
         counts = []
@@ -234,9 +234,10 @@ class AtomsEnumeration():
                 for row in DB.ase_db.select(p_name=prototype['name'], limit=1):
                     cell_parameters = json.loads(row.cell_parameters)
 
-            BB = BuildBulk(prototype['spacegroup'],
-                           prototype['wyckoffs'],
-                           species,
+            BB = BuildBulk(spacegroup=prototype['spacegroup'],
+                           wyckoffs=prototype['wyckoffs'],
+                           species=species,
+                           loss_function=loss_function
                            )
             atoms_list, parameters = \
                 BB.get_wyckoff_candidate_atoms(proximity=0.9,
