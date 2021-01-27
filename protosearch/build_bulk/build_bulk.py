@@ -19,17 +19,21 @@ class BuildBulk(CellParameters):
         wyckoff positions, for example ['a', 'a', 'b', 'c']
     species: list
         atomic species, for example ['Fe', 'O', 'O', 'O']
+    loss_function: function
+       Loss function for wyckoff optimization
     """
 
     def __init__(self,
                  spacegroup,
                  wyckoffs,
-                 species
+                 species,
+                 loss_function=None
                  ):
 
         super().__init__(spacegroup=spacegroup,
                          wyckoffs=wyckoffs,
-                         species=species)
+                         species=species,
+                         loss_function=loss_function)
 
         assert (0 < spacegroup < 231 and isinstance(spacegroup, int)), \
             'Spacegroup must be an integer between 1 and 230'
