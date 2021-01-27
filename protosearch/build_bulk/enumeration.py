@@ -10,7 +10,7 @@ from ase.symbols import string2symbols
 from protosearch.build_bulk.build_bulk import BuildBulk
 from protosearch.build_bulk.cell_parameters import CellParameters
 from protosearch.workflow.prototype_db import PrototypeSQL
-from .fitness_function import get_covalent_density, get_fitness
+from .loss_function import get_loss, get_covalent_density
 
 
 class Enumeration():
@@ -263,10 +263,10 @@ class AtomsEnumeration():
                 key_value_pairs.update(
                     {'cell_parameters': json.dumps(parameters[i])})
 
-                fitness = get_fitness(atoms)
+                loss = get_loss(atoms)
                 apf = get_covalent_density(atoms)
 
-                key_value_pairs.update({'fitness': fitness,
+                key_value_pairs.update({'loss_function': loss,
                                         'apf': apf})
 
                 with PrototypeSQL(filename=self.filename) as DB:
