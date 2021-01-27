@@ -12,7 +12,7 @@ from protosearch.utils.data import metal_numbers, prefered_O_state, \
 
 fixed_oxi_states = {'O': -2,
                     'S': -2,
-                    'N': -3
+                    'N': -3,
                     'F': -1,
                     'Cl': -1}
 

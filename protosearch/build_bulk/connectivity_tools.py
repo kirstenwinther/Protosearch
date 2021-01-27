@@ -1,3 +1,5 @@
+import numpy as np
+import scipy
 from shapely.geometry import Polygon
 
 def expand_cell(atoms, cutoff=None, padding=None):
@@ -285,7 +287,7 @@ def get_weighted_area(vertices, d):
 
 def get_connections(atoms, decimals=1):
 
-    connectivity = get_area_neighbors()  # get_cutoff_neighbors(atoms)
+    connectivity = get_area_neighbors(atoms)  # get_cutoff_neighbors(atoms)
 
     atoms_connections = {}
 
