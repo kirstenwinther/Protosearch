@@ -150,16 +150,25 @@ class AtomsEnumeration():
                  elements,
                  max_atoms=None,
                  max_wyckoffs=None,
-                 spacegroups=None):
+                 spacegroups=None,
+                 loss_function=None):
         self.elements = elements
         self.max_atoms = max_atoms
         self.max_wyckoffs = max_wyckoffs
         self.spacegroups = spacegroups or list(range(1, 231))
+        if loss_function is not None:
+            self.loss_function = loss_function
+            self.loss_function._type = 'custom'
+        else:
+            self.loss_function = get_loss
+            self.loss_function._type = 'simple'
 
         for key, value in self.elements.items():
             self.elements[key] = map_elements(value)
 
-    def store_atom_enumeration(self, filename=None, multithread=False,
+    def store_atom_enumeration(self,
+                               filename=None,
+                               multithread=False,
                                max_candidates=1):
         self.filename = filename
         DB = PrototypeSQL(filename=filename)
@@ -195,7 +204,8 @@ class AtomsEnumeration():
             for prototype in prototypes:
                 self.store_atoms_for_prototype(prototype)
 
-    def store_atoms_for_prototype(self, prototype, max_candidates=1, loss_function=None):
+    def store_atoms_for_prototype(self, prototype,
+                                  max_candidates=1):
 
         p_name = prototype['name']
         counts = []
@@ -237,7 +247,7 @@ class AtomsEnumeration():
             BB = BuildBulk(spacegroup=prototype['spacegroup'],
                            wyckoffs=prototype['wyckoffs'],
                            species=species,
-                           loss_function=loss_function
+                           loss_function=self.loss_function
                            )
             atoms_list, parameters = \
                 BB.get_wyckoff_candidate_atoms(proximity=0.9,
@@ -264,7 +274,7 @@ class AtomsEnumeration():
                 key_value_pairs.update(
                     {'cell_parameters': json.dumps(parameters[i])})
 
-                loss = get_loss(atoms)
+                loss = self.loss_function(atoms)
                 apf = get_covalent_density(atoms)
 
                 key_value_pairs.update({'loss_function': loss,
