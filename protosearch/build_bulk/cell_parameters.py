@@ -41,7 +41,6 @@ class CellParameters(WyckoffSymmetries):
                  species=None,
                  verbose=True,
                  loss_function=None
-
                  ):
 
         super().__init__(spacegroup=spacegroup,
@@ -52,6 +51,7 @@ class CellParameters(WyckoffSymmetries):
         self.species = species
         if loss_function is None:
             loss_function = get_loss
+            loss_function._type = 'simple'
         self.loss_function = loss_function
 
         self.set_lattice_dof()
@@ -171,8 +171,9 @@ class CellParameters(WyckoffSymmetries):
                                        for c in self.angle_variables])
                            and len(self.angle_variables) > 0)
 
-        optimize_lattice = not np.all([c in master_parameters for
+        optimize_lattice = (not np.all([c in master_parameters for
                                        c in self.lattice_variables])
+                            and not self.loss_function._type == 'simple')
 
         if not np.any([optimize_wyckoffs, optimize_angles, optimize_lattice]):
             print('No parameters to optimize!')
@@ -284,16 +285,30 @@ class CellParameters(WyckoffSymmetries):
 
         population = []
 
+        lower_bound = []
+        upper_bound = []
         feature_variables = list(self.coor_variables)
+
+        lower_bound += [0 for i in self.coor_variables]
+        upper_bound += [1 for i in self.coor_variables]
 
         if optimize_angles:
             feature_variables += list(self.angle_variables)
+            lower_bound += [55 for i in self.angle_variables]
+            upper_bound += [125 for i in self.angle_variables]
+
+        if optimize_lattice:
+            # Inlcude lattice vectors in swarm optimization
+            feature_variables += list(self.lattice_variables)
+            lower_bound += [2 for i in self.lattice_variables]
+            upper_bound += [(50 * self.natoms) ** (1/3)
+                            for i in self.lattice_variables]
 
         n_parameters = len(feature_variables)
 
         n_particles = 4 * n_parameters
 
-        bounds = (np.zeros([n_parameters]), np.ones([n_parameters]))
+        bounds = (np.array(lower_bound), np.array(upper_bound))
 
         options = {'c1': c1,
                    'c2': c2,
@@ -301,11 +316,6 @@ class CellParameters(WyckoffSymmetries):
                    'k': n_parameters,
                    'p': p,
                    'r': 1}
-
-        if optimize_angles:
-            n_ang = len(self.angle_variables)
-            bounds[0][-n_ang:] = 55
-            bounds[1][-n_ang:] = 125
 
         def get_loss_for_param(*args):
             coor = {}
@@ -319,9 +329,12 @@ class CellParameters(WyckoffSymmetries):
 
                 atoms = self.construct_atoms(cell_parameters)
 
-                atoms = self.optimize_lattice_constants(atoms,
-                                                        proximity=proximity,
-                                                        optimize_wyckoffs=False)
+                if not optimize_lattice:
+                    # Optimize lattice separately
+                    atoms = self.optimize_lattice_constants(atoms,
+                                                            proximity=proximity,
+                                                            optimize_wyckoffs=False)
+
                 if atoms is None:
                     loss = 0
                 else:
@@ -344,9 +357,10 @@ class CellParameters(WyckoffSymmetries):
 
         atoms = self.construct_atoms(cell_parameters)
 
-        atoms = self.optimize_lattice_constants(atoms,
-                                                proximity=proximity,
-                                                optimize_wyckoffs=False)
+        if not optimize_lattice:
+            atoms = self.optimize_lattice_constants(atoms,
+                                                    proximity=proximity,
+                                                    optimize_wyckoffs=False)
 
         return [atoms]
 
