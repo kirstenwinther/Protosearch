@@ -1,10 +1,11 @@
 import sys
+import string
 import numpy as np
-from spglib import get_symmetry_dataset, standardize_cell
+from spglib import get_symmetry_dataset, standardize_cell, delaunay_reduce, niggli_reduce
+import ase
 from ase import Atoms
 from ase.spacegroup import Spacegroup
 from ase.build import cut
-
 
 from .wyckoff_symmetries import WyckoffSymmetries, wrap_coordinate
 
@@ -15,46 +16,107 @@ wyckoff_data = path + '/Wyckoff.dat'
 wyckoff_pairs = path + '/Symmetric_Wyckoff_Pairs.dat'
 
 
-class PrototypeClassification(WyckoffSymmetries):
+class PrototypeClassification():  # WyckoffSymmetries):
     """Prototype classification of atomic structure in ASE Atoms format"""
 
     def __init__(self, atoms, tolerance=1e-3):
 
+        self.tolerance = tolerance
+
+        atoms = self.get_conventional_atoms(atoms)
+
+        self.set_sorted_wyckoff_species(atoms)
+        self.spacegroup = self.spglibdata['number']
+
+    def get_conventional_atoms(self, atoms):
+        """Set conventional cell and wyckoff positions"""
+
+        lattice, scaled_positions, numbers = \
+            standardize_cell(atoms,
+                             to_primitive=False,
+                             no_idealize=False,
+                             symprec=self.tolerance)
+
+        transform = lattice*np.linalg.inv(delaunay_reduce(lattice))
+
+        atoms = Atoms(numbers=numbers,
+                      cell=lattice,
+                      pbc=True)
+
+        atoms.set_scaled_positions(scaled_positions)
+
+        self.set_sorted_wyckoff_species(atoms)
+        atoms_list = [atoms.copy()]
+        wyckoffs_list = [''.join(self.ordered_wyckoffs)]
+
+        # Change origin of unit cell
+        for idx in range(len(atoms)):
+            atoms.positions -= np.repeat(
+                atoms.positions[idx:idx+1], len(atoms), axis=0)
+            atoms.positions *= -1
+            atoms.wrap()
+            atoms_list += [atoms.copy()]
+            self.set_sorted_wyckoff_species(atoms)
+            wyckoffs_list += [''.join(self.ordered_wyckoffs)]
+
+        wyckoff_map_idx = np.argsort(wyckoffs_list)[0]
+        atoms = atoms_list[wyckoff_map_idx]
+
+        return atoms
+
+    def set_sorted_wyckoff_species(self, atoms):
+
         self.spglibdata = get_symmetry_dataset((atoms.get_cell(),
                                                 atoms.get_scaled_positions(),
                                                 atoms.get_atomic_numbers()),
-                                               symprec=tolerance)
-
-        self.tolerance = tolerance
-
-        self.spacegroup = self.spglibdata['number']
-        self.Spacegroup = Spacegroup(self.spacegroup)
-        self.atoms = self.get_conventional_atoms(atoms)
-
-        super().__init__(spacegroup=self.spacegroup)
-
-        self.set_wyckoff_species()
-        WyckoffSymmetries.wyckoffs = self.wyckoffs
-        WyckoffSymmetries.species = self.species
-
-
-    def get_conventional_atoms(self, atoms):
-        """Transform from primitive to conventional cell"""
-
-
-        std_cell = self.spglibdata['std_lattice']
-
-        positions = self.spglibdata['std_positions']
+                                               symprec=self.tolerance)
         numbers = self.spglibdata['std_types']
 
-        atoms = Atoms(numbers=numbers,
-                      cell=std_cell,
-                      pbc=True)
+        unique_numbers, counts = np.unique(numbers, return_counts=True)
+        idx = np.argsort(counts)
+        counts = counts[idx]
+        unique_numbers = unique_numbers[idx]
 
-        atoms.set_scaled_positions(positions)
-        atoms.wrap()
+        wyckoffs = self.spglibdata['wyckoffs']
+        equivalent_atoms = self.spglibdata['equivalent_atoms']
+        wyckoff_list = []
+        species_list = list(Atoms(unique_numbers).symbols)
+        self.wyckoff_multiplicities = {}
+        for n in unique_numbers:
+            wyckoff_n = []
+            unique_eq, indices_eq = np.unique(
+                equivalent_atoms, return_index=True)
+            idx0 = np.where(numbers[unique_eq] == n)[0]
+            idx = indices_eq[idx0]
 
-        return atoms
+            for eq_atom in set(idx):
+                w = wyckoffs[eq_atom]
+                count_w = len(np.where(equivalent_atoms == eq_atom)[0])
+                wyckoff_n += [w]
+                self.wyckoff_multiplicities[w] = count_w
+
+            wyckoff_list += [''.join(sorted(wyckoff_n))]
+
+        wyckoff_list = np.array(wyckoff_list)
+        species_list = np.array(species_list)
+        for c in set(counts):
+            idx_count = np.where(counts == c)[0]
+            if len(idx_count) == 1:
+                continue
+
+            idx_count_sort = np.argsort(wyckoff_list[idx_count])
+            wyckoff_list[idx_count] = wyckoff_list[idx_count][idx_count_sort]
+            species_list[idx_count] = species_list[idx_count][idx_count_sort]
+
+        self.ordered_wyckoffs = wyckoff_list
+        self.ordered_species = species_list
+
+        self.wyckoffs = []
+        self.species = []
+        for s, w in zip(species_list, wyckoff_list):
+            for wi in w:
+                self.wyckoffs += [wi]
+                self.species += [s]
 
     def get_primitive_atoms(self, atoms):
         """Transform from primitive to conventional cell"""
@@ -74,68 +136,50 @@ class PrototypeClassification(WyckoffSymmetries):
 
         return atoms
 
-    def set_wyckoff_species(self):
-        self.wyckoffs = []
-        self.species = []
+    def get_prototype_name(self):
+        alphabet = list(string.ascii_uppercase)
+        unique_symbols = []
+        symbol_count = []
+        species = self.species
+        for w, s in zip(self.wyckoffs, self.species):
+            if s in unique_symbols:
+                index = unique_symbols.index(s)
+                symbol_count[index] += self.wyckoff_multiplicities[w]
+            else:
+                symbol_count += [self.wyckoff_multiplicities[w]]
+                unique_symbols += [s]
 
-        relative_positions = np.dot(np.linalg.inv(
-            self.atoms.cell.T), self.atoms.positions.T).T
+        min_rep = min(symbol_count)
 
-        relative_positions = np.round(relative_positions, 10)
+        for n in list(range(1, min_rep + 1))[::-1]:
+            if np.all(np.array(symbol_count) % n == 0):
+                repetition = n
+                break
 
-        normalized_sites = \
-            self.Spacegroup.symmetry_normalised_sites(
-                np.array(relative_positions,
-                         ndmin=2))
+        p_name = ''
+        for ii, i in enumerate(np.argsort(symbol_count)):
+            p_name += alphabet[ii]
+            factor = symbol_count[i] // repetition
+            if factor > 1:
+                p_name += str(factor)
 
-        equivalent_sites = []
-        for i, site in enumerate(normalized_sites):
-            indices = np.all(np.isclose(site, normalized_sites[:i+1],
-                                        rtol=self.tolerance), axis=1)
-            index = np.min(np.where(indices)[0])
-            equivalent_sites += [index]
+        repetition = repetition * len(set(self.spglibdata['mapping_to_primitive'])) \
+            / len(self.spglibdata['std_types'])
 
-        unique_site_indices = list(set(equivalent_sites))
+        p_name += '_' + str(int(repetition))
 
-        unique_sites = normalized_sites[unique_site_indices]
-        count_sites = [list(equivalent_sites).count(i)
-                       for i in unique_site_indices]
+        w_name = []
+        for ws in self.ordered_wyckoffs:
+            for letter in set(list(ws)):
+                count = ws.count(letter)
+                if count > 1:
+                    ws = ws.replace(letter * count, letter + str(count))
+            w_name += [ws]
+        w_name = '_'.join(w_name)
+        p_name += '_' + w_name
+        p_name += '_' + str(self.spacegroup)
 
-        symbols = self.atoms[unique_site_indices].get_chemical_symbols()
-
-        for i, position in enumerate(unique_sites):
-            found = False
-            for w in sorted(self.wyckoff_symmetries.keys()):
-                m = self.wyckoff_multiplicities[w]
-                if not count_sites[i] == m:
-                    continue
-                for w_sym in self.wyckoff_symmetries[w]:
-                    if found:
-                        break
-                    if self.is_position_wyckoff(position, w_sym):
-                        found = True
-                        self.wyckoffs += [w]
-                        self.species += [symbols[i]]
-                        break
-            if not found:
-                print('Error: position: ', position, ' not identified')
-
-        indices = np.argsort(self.species)
-
-        w_sorted = []
-        # for s in set(self.species):
-        #    indices = [i for i, s0 in enumerate(self.species) if s0==s]
-        #    w_sorted += sorted([self.wyckoffs[i] for i in indices])
-        #self.wyckoffs = w_sorted
-
-        free_wyckoffs = self.get_free_wyckoffs()
-        self.atoms_wyckoffs = []
-        self.free_atoms = []
-        for site in equivalent_sites:
-            index = unique_site_indices.index(site)
-            w_position = self.wyckoffs[index]
-            self.atoms_wyckoffs += [w_position + str(index)]
-            self.free_atoms += [w_position in free_wyckoffs]
+        return p_name
 
     def get_spacegroup(self):
         return self.spacegroup
@@ -145,7 +189,7 @@ class PrototypeClassification(WyckoffSymmetries):
 
     def get_classification(self, include_parameters=True):
 
-        p_name = self.get_prototype_name(self.species)
+        p_name = self.get_prototype_name()
 
         structure_name = str(self.spacegroup)
         for spec, wy_spec in zip(self.species, self.wyckoffs):
@@ -157,13 +201,13 @@ class PrototypeClassification(WyckoffSymmetries):
                      'wyckoffs': self.wyckoffs,
                      'species': self.species}
 
-        if include_parameters:
-            cell_parameters = self.get_cell_parameters(self.atoms)
+        # if include_parameters:
+        #    cell_parameters = self.get_cell_parameters(self.atoms)
 
-            return prototype, cell_parameters
+        #    return prototype, cell_parameters
 
-        else:
-            return prototype
+        # else:
+        return prototype
 
 
 def get_wyckoff_pair_symmetry_matrix(spacegroup):

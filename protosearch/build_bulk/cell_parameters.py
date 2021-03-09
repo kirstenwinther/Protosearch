@@ -56,7 +56,6 @@ class CellParameters(WyckoffSymmetries):
 
         self.set_lattice_dof()
         if self.wyckoffs is not None:
-            #self.p_name = self.get_prototype_name(species)
             self.parameter_guess = self.initial_guess()
 
         self.verbose = verbose
@@ -172,7 +171,7 @@ class CellParameters(WyckoffSymmetries):
                            and len(self.angle_variables) > 0)
 
         optimize_lattice = (not np.all([c in master_parameters for
-                                       c in self.lattice_variables])
+                                        c in self.lattice_variables])
                             and not self.loss_function._type == 'simple')
 
         if not np.any([optimize_wyckoffs, optimize_angles, optimize_lattice]):
@@ -225,6 +224,7 @@ class CellParameters(WyckoffSymmetries):
 
     def crossover(self, population, n_per_couple=10, n_children=None):
         """Generate new candidate by mixing values of two"""
+
         children = []
         variables = list(population[0].keys())
         for i, pop in enumerate(population):

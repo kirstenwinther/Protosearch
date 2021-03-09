@@ -151,54 +151,6 @@ class WyckoffSymmetries:
                 self.symmetry_map += [sym_indices]
             atoms_index += m
 
-    def get_prototype_name(self, species):
-        alphabet = list(string.ascii_uppercase)
-        unique_symbols = []
-        symbol_count = []
-
-        for i, s in enumerate(species):
-            if s in unique_symbols:
-                index = unique_symbols.index(s)
-                symbol_count[index] += self.wyckoff_multiplicities[self.wyckoffs[i]]
-            else:
-                symbol_count += [self.wyckoff_multiplicities[self.wyckoffs[i]]]
-                unique_symbols += [s]
-
-        min_rep = min(symbol_count)
-
-        for n in list(range(1, min_rep + 1))[::-1]:
-            if np.all(np.array(symbol_count) % n == 0):
-                repetition = n
-                break
-
-        p_name = ''
-        for ii, i in enumerate(np.argsort(symbol_count)):
-            p_name += alphabet[ii]
-            factor = symbol_count[i] // n
-            if factor > 1:
-                p_name += str(factor)
-
-        p_name += '_' + str(repetition)  # // len(self.class_coordinates))
-
-        added_species = ['']
-        for i, w in enumerate(self.wyckoffs):
-            s = species[i]
-
-            if not s == added_species[-1]:
-                p_name += '_'
-                p_name += w
-            else:
-                if w == p_name[-1]:
-                    p_name += '2'
-                elif p_name[-1].isdigit() and w == p_name[-2]:
-                    p_name = p_name[:-1] + str(int(p_name[-1]) + 1)
-                else:
-                    p_name += w
-
-            added_species += [s]
-        p_name += '_' + str(self.spacegroup)
-
-        return p_name
 
     def get_wyckoff_transform_vector(self, vector, index_a, index_b, cell):
         vector = np.dot(np.linalg.inv(cell.T),
