@@ -317,7 +317,10 @@ class PrototypeSQL:
             if len(query) > 0:
                 query += ' and'
             if key == 'max_atoms':
-                query += "natom<={}".format(value)
+                query += " natom<={}".format(value)
+            elif key == 'max_wyckoffs':
+                max_length = len(str(['a' for i in range(value)]))
+                query += " length(wyckoffs)<={}".format(max_length)
             elif key == 'spacegroups':
                 value = [str(v) for v in value]
                 sg_str = '(' + ','.join(value) + ')'

@@ -25,8 +25,8 @@ class ActiveLearningLoop:
                  batch_size=10,
                  min_atoms=None,
                  max_atoms=None,
-                 min_wyckoff=None,
-                 max_wyckoff=None,
+                 min_wyckoffs=None,
+                 max_wyckoffs=None,
                  enumeration_type='wyckoff',
                  check_frequency=300,
                  frac_jobs_limit=0.7,
@@ -63,8 +63,8 @@ class ActiveLearningLoop:
         self.batch_size = batch_size
         self.min_atoms = min_atoms
         self.max_atoms = max_atoms
-        self.min_wyckoff = min_wyckoff
-        self.max_wyckoff = max_wyckoff
+        self.min_wyckoffs = min_wyckoffs
+        self.max_wyckoffs = max_wyckoffs
         self.enumeration_type = enumeration_type
         self.check_frequency = check_frequency
         self.frac_jobs_limit = frac_jobs_limit
@@ -285,7 +285,8 @@ class ActiveLearningLoop:
             for chemical_formula in chemical_formulas:
                 OI.store_enumeration(filename=self.db_filename,
                                      chemical_formula=chemical_formula,
-                                     max_atoms=self.max_atoms)
+                                     max_atoms=self.max_atoms,
+                                     max_wyckoffs=self.max_wyckoffs)
 
         # Enumerate prototypes as a next step
         # experimental structures will not be overwritten.
@@ -297,6 +298,7 @@ class ActiveLearningLoop:
 
             AE = AtomsEnumeration(self.elements,
                                   self.max_atoms,
+                                  self.max_wyckoffs,
                                   spacegroups)
             print('Enumerating atoms')
             AE.store_atom_enumeration(filename=self.db_filename,
@@ -311,8 +313,8 @@ class ActiveLearningLoop:
             SG_start_end = [[1, 230]]
 
         if self.enumeration_type == 'wyckoff':
-            num_min = self.min_wyckoff
-            num_max = self.max_wyckoff
+            num_min = self.min_wyckoffs
+            num_max = self.max_wyckoffs
         else:
             num_min = self.min_atoms
             num_max = self.max_atoms

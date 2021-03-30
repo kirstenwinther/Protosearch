@@ -10,7 +10,7 @@ from ase.symbols import string2symbols
 from protosearch.build_bulk.build_bulk import BuildBulk
 from protosearch.build_bulk.cell_parameters import CellParameters
 from protosearch.workflow.prototype_db import PrototypeSQL
-from .fitness_function import get_covalent_density, get_fitness
+from .loss_function import get_loss, get_covalent_density
 
 
 class Enumeration():
@@ -149,15 +149,26 @@ class AtomsEnumeration():
     def __init__(self,
                  elements,
                  max_atoms=None,
-                 spacegroups=None):
+                 max_wyckoffs=None,
+                 spacegroups=None,
+                 loss_function=None):
         self.elements = elements
         self.max_atoms = max_atoms
+        self.max_wyckoffs = max_wyckoffs
         self.spacegroups = spacegroups or list(range(1, 231))
+        if loss_function is not None:
+            self.loss_function = loss_function
+            self.loss_function._type = 'custom'
+        else:
+            self.loss_function = get_loss
+            self.loss_function._type = 'simple'
 
         for key, value in self.elements.items():
             self.elements[key] = map_elements(value)
 
-    def store_atom_enumeration(self, filename=None, multithread=False,
+    def store_atom_enumeration(self,
+                               filename=None,
+                               multithread=False,
                                max_candidates=1):
         self.filename = filename
         DB = PrototypeSQL(filename=filename)
@@ -165,6 +176,7 @@ class AtomsEnumeration():
         N0 = DB.ase_db.count()
 
         prototypes = DB.select(max_atoms=self.max_atoms,
+                               max_wyckoffs=self.max_wyckoffs,
                                spacegroups=self.spacegroups,
                                source='prototype')
         Nprot = len(prototypes)
@@ -192,7 +204,8 @@ class AtomsEnumeration():
             for prototype in prototypes:
                 self.store_atoms_for_prototype(prototype)
 
-    def store_atoms_for_prototype(self, prototype, max_candidates=1):
+    def store_atoms_for_prototype(self, prototype,
+                                  max_candidates=1):
 
         p_name = prototype['name']
         counts = []
@@ -208,10 +221,22 @@ class AtomsEnumeration():
         cell_parameters = prototype.get('cell_parameters', None)
         if cell_parameters:
             cell_parameters = json.load(cell_parameters)
+
+        structure_names = []
         for species in species_lists:
             structure_name = str(prototype['spacegroup'])
+            structure_name_list = []
             for spec, wy_spec in zip(species, prototype['wyckoffs']):
-                structure_name += '_{}_{}'.format(spec, wy_spec)
+                structure_name_list += ['{}_{}'.format(spec, wy_spec)]
+
+            structure_name_w = '_'.join(sorted(structure_name_list))
+            if structure_name_w in structure_names:
+                continue
+            else:
+                structure_names += [structure_name_w]
+
+            # {}_{}'.format(spec, wy_spec)
+            structure_name += '_' + structure_name_w
             with PrototypeSQL(filename=self.filename) as DB:
                 if DB.ase_db.count(structure_name=structure_name) > 0:
                     continue
@@ -219,12 +244,13 @@ class AtomsEnumeration():
                 for row in DB.ase_db.select(p_name=prototype['name'], limit=1):
                     cell_parameters = json.loads(row.cell_parameters)
 
-            BB = BuildBulk(prototype['spacegroup'],
-                           prototype['wyckoffs'],
-                           species,
+            BB = BuildBulk(spacegroup=prototype['spacegroup'],
+                           wyckoffs=prototype['wyckoffs'],
+                           species=species,
+                           loss_function=self.loss_function
                            )
             atoms_list, parameters = \
-                BB.get_wyckoff_candidate_atoms(proximity=1,
+                BB.get_wyckoff_candidate_atoms(proximity=0.9,
                                                primitive_cell=True,
                                                return_parameters=True,
                                                max_candidates=max_candidates)
@@ -248,10 +274,10 @@ class AtomsEnumeration():
                 key_value_pairs.update(
                     {'cell_parameters': json.dumps(parameters[i])})
 
-                fitness = get_fitness(atoms)
+                loss = self.loss_function(atoms)
                 apf = get_covalent_density(atoms)
 
-                key_value_pairs.update({'fitness': fitness,
+                key_value_pairs.update({'loss_function': loss,
                                         'apf': apf})
 
                 with PrototypeSQL(filename=self.filename) as DB:
