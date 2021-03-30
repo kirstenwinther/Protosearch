@@ -41,6 +41,7 @@ class CellParameters(WyckoffSymmetries):
                  species=None,
                  verbose=True,
                  loss_function=None
+                 swarm_options=None
                  ):
 
         super().__init__(spacegroup=spacegroup,
@@ -60,6 +61,7 @@ class CellParameters(WyckoffSymmetries):
             self.parameter_guess = self.initial_guess()
 
         self.verbose = verbose
+        self.swarm_options = swarm_options
 
     def set_lattice_dof(self):
         """Set degrees of freedom for lattice constants and angles
@@ -316,6 +318,7 @@ class CellParameters(WyckoffSymmetries):
                    'k': n_parameters,
                    'p': p,
                    'r': 1}
+        options.update(self.swarm_options)
 
         def get_loss_for_param(*args):
             coor = {}
