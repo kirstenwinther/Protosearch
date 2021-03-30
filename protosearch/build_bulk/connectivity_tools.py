@@ -1,21 +1,6 @@
 import numpy as np
 import scipy
 from shapely.geometry import Polygon
-from ase.data import covalent_radii as cradii
-from pymatgen.io.ase import AseAtomsAdaptor
-from pymatgen.analysis.ewald import EwaldSummation
-
-from protosearch.utils.data import metal_numbers, prefered_O_state,\
-    favored_O_connections, electronegs
-
-
-fixed_oxi_states = {'O': -2,
-                    'S': -2,
-                    'N': -3,
-                    'P': -3,
-                    'F': -1,
-                    'Cl': -1}
-
 
 def expand_cell(atoms, cutoff=None, padding=None):
     """
@@ -300,143 +285,9 @@ def get_weighted_area(vertices, d):
     return area
 
 
-def get_covalent_density(atoms):
-
-    covalent_radii = np.array([cradii[n] for n in atoms.numbers])
-    covalent_volume = np.sum(4/3 * np.pi * covalent_radii ** 3)
-    cell_volume = atoms.get_volume()
-    density = covalent_volume / cell_volume
-
-    return density
-
-
-def get_apf_fitness(atoms, apf_0=0.1):
-    """ Volume dependent fitness function, expressed in terms of the 
-    atomic packing factor V_atoms/V_cell assuming a fermi function dependence
-
-    Parameters:
-    apf_0:  APF value where fitness=0.5
-    """
-
-    apf = get_covalent_density(atoms)
-    fitness = 1 / (np.exp(-(apf - apf_0)/0.05) + 1)
-
-    return fitness
-
-
-def get_fitness(atoms):
-    N_metal = len([a for a in atoms if a.number in metal_numbers])
-    symbols = atoms.get_chemical_symbols()
-
-    if N_metal == len(atoms):
-        # If metal use volume as fitness
-        fitness = - atoms.get_volume()
-    else:
-        fitness = - get_ewald_energy(atoms)
-        fitness *= get_apf_fitness(atoms)
-
-    return fitness
-
-
-def get_oxidation_states(atoms):
-
-    metal_idx = [i for i, a in enumerate(
-        atoms) if a.number in metal_numbers]
-
-    non_metal_idx = [i for i in range(len(atoms)) if not i in metal_idx]
-
-    symbols = atoms.get_chemical_symbols()
-
-    fix_oxi_nonM = np.array([fixed_oxi_states[symbols[i]]
-                             for i in non_metal_idx])
-
-    if len(fix_oxi_nonM) == 0:
-        raise NotImplementedError('Fitness for {} composition not implemented'
-                                  .format(atoms.get_chemical_formula))
-
-    oxi_states = np.array([-2] * len(atoms), dtype=float)
-    oxi_states[non_metal_idx] = fix_oxi_nonM
-    con_matrix = get_area_neighbors(atoms)
-    for mi in metal_idx:
-        M_nonM_connectivity = con_matrix[mi][non_metal_idx]
-
-        norm = np.sum(con_matrix[non_metal_idx][:, metal_idx], axis=-1)
-
-        idx = np.where(norm > 0)[0]
-
-        oxi_states[mi] = -sum(M_nonM_connectivity[idx]
-                              * fix_oxi_nonM[idx] / norm[idx])
-    return oxi_states
-
-
-def get_ewald_energy(atoms, use_density=True):
-    oxi_states = get_oxidation_states(atoms)
-
-    structure = AseAtomsAdaptor.get_structure(atoms)
-    structure.add_oxidation_state_by_site(oxi_states)
-    e = EwaldSummation(structure).total_energy
-
-    return e / len(atoms)
-
-
-def get_oxy_fitness(atoms):
-    a = 1
-
-
-def get_optimal_oxidation_states_for_composition(metal_symbols, n_O):
-    """
-    A_nB_mO_k with oxidation states O_A and O_B setting O_O = 2
-    Solve for integers O_A and O_B
-    n_A * O_A + n_B * O_B = n_O * 2
-    """
-
-    n_M = len(metal_symbols)
-    avg_oxi_state = n_O / n_M * 2
-
-    oxi_states_dict = {}
-    metal_symbols, counts = np.unique(metal_symbols, return_counts=True)
-
-    electroneg = [electronegs.get(m, 0) for m in metal_symbols]
-    indices = np.argsort(electroneg)[::-1]
-    metal_symbols = metal_symbols[indices]
-
-    #n_M_list = [list(metal_symbols).count(m) for m in metal_symbols]
-    # print(n_M_list)
-    pref_O_states = [prefered_O_state[m] for m in metal_symbols]
-
-    if len(metal_symbols) == 2:
-        # Make a guess for favorable oxidation states
-        oxy_matches = []
-        n_A, n_B = counts
-        for o_A in range(1, n_O * 2 // n_A):
-            o_B = (2 * n_O - n_A * o_A) / n_B
-            if o_B % 1 == 0:
-                oxy_matches += [[o_A, int(o_B)]]
-
-        oxy_matches = np.array(oxy_matches)
-
-        pref_O_M = np.repeat(np.expand_dims(pref_O_states, 0),
-                             len(oxy_matches[:, 0]), 0)
-
-        Oxy_fitness = np.sum(np.abs(oxy_matches - pref_O_M), axis=1)
-
-        best_fit = np.argmin(Oxy_fitness)
-
-        oxy_state_list = oxy_matches[best_fit]
-
-    elif len(metal_symbols) == 1:  # only one type of metal
-        oxy_state_list = [avg_oxi_state]
-
-    oxi_states = {}
-    for i, m in enumerate(metal_symbols):
-        oxi_states.update({m: int(oxy_state_list[i])})
-
-    return oxi_states
-
-
 def get_connections(atoms, decimals=1):
 
-    connectivity = get_area_neighbors(atoms)
+    connectivity = get_area_neighbors(atoms)  # get_cutoff_neighbors(atoms)
 
     atoms_connections = {}
 

@@ -10,7 +10,7 @@ import pandas as pd
 from protosearch.utils.data import metal_numbers
 from protosearch.workflow.prototype_db import PrototypeSQL
 from protosearch import build_bulk
-from .fitness_function import get_connections
+from .connectivity_tools import get_connections
 from .spglib_interface import SpglibInterface
 from .cell_parameters import CellParameters
 
