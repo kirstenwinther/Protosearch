@@ -27,7 +27,7 @@ class BuildBulk(CellParameters):
                  spacegroup,
                  wyckoffs,
                  species,
-                 loss_function=None
+                 loss_function=None,
                  swarm_options=None
                  ):
 
