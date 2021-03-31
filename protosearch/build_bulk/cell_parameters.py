@@ -61,7 +61,7 @@ class CellParameters(WyckoffSymmetries):
             self.parameter_guess = self.initial_guess()
 
         self.verbose = verbose
-        self.swarm_options = swarm_options
+        self.swarm_options = swarm_options or {}
 
     def set_lattice_dof(self):
         """Set degrees of freedom for lattice constants and angles
@@ -308,8 +308,8 @@ class CellParameters(WyckoffSymmetries):
 
         n_parameters = len(feature_variables)
 
-        n_particles = 4 * n_parameters
-
+        n_particles = self.swarm_options.get('n_particles') or 4 * n_parameters
+        topology = self.swarm_options.get('topology') or Ring()
         bounds = (np.array(lower_bound), np.array(upper_bound))
 
         options = {'c1': c1,
@@ -348,9 +348,9 @@ class CellParameters(WyckoffSymmetries):
 
         optimizer = GeneralOptimizerPSO(n_particles=n_particles,
                                         dimensions=n_parameters,
-                                        #velocity_clamp=(0.01, 10),
-                                        options=options, bounds=bounds,
-                                        topology=Ring())
+                                        options=options,
+                                        bounds=bounds,
+                                        topology=topology)
 
         stats = optimizer.optimize(get_loss_for_param, iters=niter)
 
