@@ -40,7 +40,7 @@ class CellParameters(WyckoffSymmetries):
                  wyckoffs=None,
                  species=None,
                  verbose=True,
-                 loss_function=None
+                 loss_function=None,
                  swarm_options=None
                  ):
 
