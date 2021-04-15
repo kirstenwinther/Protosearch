@@ -23,9 +23,9 @@ class PrototypeClassification():  # WyckoffSymmetries):
 
         self.tolerance = tolerance
 
-        atoms = self.get_conventional_atoms(atoms)
+        self.atoms = self.get_conventional_atoms(atoms)
 
-        self.set_sorted_wyckoff_species(atoms)
+        self.set_sorted_wyckoff_species(self.atoms)
         self.spacegroup = self.spglibdata['number']
 
     def get_conventional_atoms(self, atoms):
@@ -36,8 +36,6 @@ class PrototypeClassification():  # WyckoffSymmetries):
                              to_primitive=False,
                              no_idealize=False,
                              symprec=self.tolerance)
-
-        transform = lattice*np.linalg.inv(delaunay_reduce(lattice))
 
         atoms = Atoms(numbers=numbers,
                       cell=lattice,

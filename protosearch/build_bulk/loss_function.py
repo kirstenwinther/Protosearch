@@ -188,6 +188,8 @@ def get_optimal_oxidation_states_for_composition(atoms):
 
     elif len(metal_symbols) == 1:  # only one type of metal
         oxy_state_list = [avg_oxi_state]
+    else:
+        oxy_state_list = [avg_oxi_state for m in metal_symbols]
 
     oxi_states = {}
     for i, m in enumerate(metal_symbols):

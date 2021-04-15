@@ -1,6 +1,7 @@
 import numpy as np
 import scipy
 from shapely.geometry import Polygon
+from catkit.gen.utils.connectivity import get_cutoff_neighbors, get_voronoi_neighbors
 
 def expand_cell(atoms, cutoff=None, padding=None):
     """
@@ -287,7 +288,9 @@ def get_weighted_area(vertices, d):
 
 def get_connections(atoms, decimals=1):
 
-    connectivity = get_area_neighbors(atoms)  # get_cutoff_neighbors(atoms)
+    connectivity = get_voronoi_neighbors(atoms) #get_cutoff_neighbors(atoms, scale_cov_radii=1.3)
+
+    # get_area_neighbors(atoms)  # get_cutoff_neighbors(atoms)
 
     atoms_connections = {}
 
