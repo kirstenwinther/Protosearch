@@ -27,13 +27,15 @@ class BuildBulk(CellParameters):
                  spacegroup,
                  wyckoffs,
                  species,
-                 loss_function=None
+                 loss_function=None,
+                 swarm_options=None
                  ):
 
         super().__init__(spacegroup=spacegroup,
                          wyckoffs=wyckoffs,
                          species=species,
-                         loss_function=loss_function)
+                         loss_function=loss_function,
+                         swarm_options=swarm_options)
 
         assert (0 < spacegroup < 231 and isinstance(spacegroup, int)), \
             'Spacegroup must be an integer between 1 and 230'
