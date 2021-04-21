@@ -17,10 +17,6 @@ from .classification import PrototypeClassification
 from .cell_parameters import CellParameters
 from .loss_function import get_loss
 
-# print(data.__path__)
-
-path = data.__path__[0]
-
 
 class MPInterface:
     """Interace to create structurally unique atoms objects
@@ -28,8 +24,6 @@ class MPInterface:
 
     Parameters:
 
-    source: str
-        'icsd' for experimental or 'mp' for full mp dataset
     proximity: float
         Closest proximity of atoms allowed when estimating the lattice parameter
         of the structures, in units of the sum of covalent radii.
@@ -47,17 +41,14 @@ class MPInterface:
     """
 
     def __init__(self,
-                 source='icsd',
                  proximity=0.95,
                  fix_metal_ratio=False,
                  required_elements=[],
                  max_candidates=1):
 
-        if source == 'icsd':
-            # Public catalysis-hub db connection, select privileges only
-            self.dbfile = 'postgresql://apiuser:ubDwfqPw@catalysishub.c8gwuc8jwb7l.us-west-2.rds.amazonaws.com:5432/catalysishub'
-        else:
-            raise NotImplementedError
+        # Public catalysis-hub api connection, select privileges only.
+        self.dbfile = 'postgresql://apiuser:ubDwfqPw@catalysishub.c8gwuc8jwb7l.us-west-2.rds.amazonaws.com:5432/catalysishub'
+
         self.proximity = proximity
 
         self.fix_metal_ratio = fix_metal_ratio

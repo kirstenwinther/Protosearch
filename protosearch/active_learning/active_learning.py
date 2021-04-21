@@ -13,7 +13,7 @@ from protosearch.workflow.workflow import Workflow as WORKFLOW
 from protosearch.workflow.MAPI_wrapper import get_reference_energy
 from protosearch.ml_modelling.fingerprint import clean_features
 from protosearch.ml_modelling.regression_model import get_regression_model
-from protosearch.build_bulk.oqmd_interface import OqmdInterface
+from protosearch.build_bulk.MP_interface import MPInterface
 
 
 class ActiveLearningLoop:
@@ -276,14 +276,14 @@ class ActiveLearningLoop:
 
         if 'icsd' in self.source:
             # First take experimental structures
-            OI = OqmdInterface()
+            MPI = MPInterface()
             print('Enumerating experimental prototypes')
 
             chemical_formulas = get_formulas(
                 self.elements, self.stoichiometries)
 
             for chemical_formula in chemical_formulas:
-                OI.store_enumeration(filename=self.db_filename,
+                MPI.store_enumeration(filename=self.db_filename,
                                      chemical_formula=chemical_formula,
                                      max_atoms=self.max_atoms,
                                      max_wyckoffs=self.max_wyckoffs)
