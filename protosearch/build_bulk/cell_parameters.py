@@ -57,7 +57,6 @@ class CellParameters(WyckoffSymmetries):
 
         self.set_lattice_dof()
         if self.wyckoffs is not None:
-            #self.p_name = self.get_prototype_name(species)
             self.parameter_guess = self.initial_guess()
 
         self.verbose = verbose
@@ -147,7 +146,7 @@ class CellParameters(WyckoffSymmetries):
 
     def get_parameter_estimate(self,
                                master_parameters=None,
-                               proximity=0.90,
+                               proximity=0.95,
                                max_candidates=1):
         """
         Optimize lattice parameters for prototype. 
@@ -214,18 +213,16 @@ class CellParameters(WyckoffSymmetries):
             atoms = self.construct_atoms(cell_parameters)
             opt_atoms = \
                 self.optimize_lattice_constants(atoms,
-                                                optimize_wyckoffs=optimize_wyckoffs,
                                                 view_images=False,
                                                 proximity=proximity)
 
             opt_cell_parameters = [self.get_cell_parameters(opt_atoms)]
-        else:
-            opt_cell_parameters = cell_parameters_list
-            opt_atoms_list = atoms_list
+
         return opt_cell_parameters
 
     def crossover(self, population, n_per_couple=10, n_children=None):
         """Generate new candidate by mixing values of two"""
+
         children = []
         variables = list(population[0].keys())
         for i, pop in enumerate(population):
@@ -283,7 +280,6 @@ class CellParameters(WyckoffSymmetries):
         cell_parameters = self.initial_guess()
         if master_parameters:
             cell_parameters.update(master_parameters)
-
         population = []
 
         lower_bound = []
@@ -665,16 +661,12 @@ class CellParameters(WyckoffSymmetries):
 
     def optimize_lattice_constants(self,
                                    atoms,
-                                   optimize_wyckoffs=False,
                                    view_images=False,
                                    proximity=0.95):
         """
         Optimize lattice parameters by reducing the cell size (one direction at
         the time) until atomic distances on the closest pair reaches the
         sum of the covalent radii.
-
-        if the optimize_wyckoffs parameter is set, the wyckoff coordinates 
-        are optimized together with the lattice constants. 
         """
         if not atoms:
             return atoms
@@ -703,11 +695,6 @@ class CellParameters(WyckoffSymmetries):
             cell_norm = np.linalg.norm(cell, axis=1)
             axis_length_ix = np.argsort(
                 np.mean(cell_norm[d]) for d in self.d_o_f)
-            if optimize_wyckoffs:
-                images += self.run_wyckoff_optimization_loop(atoms)
-                atoms = images[-1].copy()
-                Dm, distances = get_interatomic_distances(atoms)
-                cell_volume = atoms.get_volume()
 
             min_distances = np.unravel_index(
                 np.argmin(distances/self.min_distances),
@@ -768,61 +755,6 @@ class CellParameters(WyckoffSymmetries):
                 clean_move_pairs += [pair]
 
         return clean_move_pairs
-
-    def run_wyckoff_optimization_loop(self, atoms):
-        Dm, distances = get_interatomic_distances(atoms)
-        relative_distances = distances / self.min_distances
-        move_pairs = self.get_move_pairs(distances, 1.1)
-        atoms_distance = 0.90
-        niter = 0
-        images = [atoms.copy()]
-        while len(move_pairs) > 0 and niter < atoms.get_number_of_atoms() * 3:
-            for a1, a2 in move_pairs:
-                transform_vector = Dm[a1][a2]
-                transform_vector /= np.linalg.norm(transform_vector)
-
-                move = -np.abs(1.02 - relative_distances[a1][a2]) * \
-                    self.min_distances[a1][a2] * \
-                    atoms_distance * self.hard_limit
-                transform_vector *= move
-
-                # Project onto wyckoff coordinate vector
-                transform_vector1 = self.get_wyckoff_transform_vector(
-                    transform_vector, a1, a1, atoms.cell)
-
-                atoms[a1].position += transform_vector1
-
-                if not a2 in self.symmetry_map[a1]:
-                    # No symmetry restrictions bewteen atom1 and atom2
-                    transform_vector2 = self.get_wyckoff_transform_vector(
-                        -transform_vector, a2, a2, atoms.cell)
-                    atoms[a2].position += transform_vector2
-                    sym_iter = [a1, a2]
-                    trans_vectors = [transform_vector1, transform_vector2]
-                else:
-                    sym_iter = [a1]
-                    trans_vectors = [transform_vector1]
-                for i, ia in enumerate(sym_iter):
-                    # Move all atoms in same wyckoff position as atom1 and atom2
-                    co_trans = self.symmetry_map[ia].copy()
-                    if ia in co_trans:
-                        co_trans.remove(ia)
-
-                    for ic in co_trans:
-                        transform_vector_w = \
-                            self.get_wyckoff_transform_vector(
-                                trans_vectors[i], ia, ic, atoms.cell)
-                        atoms[ic].position += transform_vector_w
-
-            atoms.wrap()
-            images += [atoms.copy()]
-            cell_volume = atoms.get_volume()
-            Dm, distances = get_interatomic_distances(atoms)
-            relative_distances = distances / self.min_distances
-            atoms_distance *= 0.90
-            move_pairs = self.get_move_pairs(distances, 1.1 * atoms_distance)
-            niter += 1
-        return images
 
 
 def clean_parameter_input(cell_parameters):
