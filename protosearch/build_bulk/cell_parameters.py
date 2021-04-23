@@ -174,14 +174,14 @@ class CellParameters(WyckoffSymmetries):
                            and len(self.angle_variables) > 0)
 
         optimize_lattice = (not np.all([c in master_parameters for
-                                       c in self.lattice_variables])
-                            and not self.loss_function._type == 'simple')
+                                        c in self.lattice_variables]))
 
         if not np.any([optimize_wyckoffs, optimize_angles, optimize_lattice]):
             print('No parameters to optimize!')
             return [cell_parameters]
 
-        if optimize_wyckoffs or optimize_angles:
+        if optimize_wyckoffs or optimize_angles or \
+           (optimize_lattice and not self.loss_function._type == 'simple'):
             opt_cell_parameters = []
 
             if self.verbose:
@@ -192,7 +192,7 @@ class CellParameters(WyckoffSymmetries):
             atoms_list = \
                 self.run_swarm_optimization(  # run_ml_ga_optimization(
                     master_parameters=master_parameters,
-                    optimize_lattice=optimize_lattice,
+                    optimize_lattice=not self.loss_function._type == 'simple',
                     optimize_angles=optimize_angles,
                     optimize_wyckoffs=optimize_wyckoffs,
                     max_candidates=max_candidates,
@@ -203,8 +203,7 @@ class CellParameters(WyckoffSymmetries):
                     self.get_cell_parameters(
                         atoms)  # .update(master_parameters)
                 opt_cell_parameters += [opt_parameters]
-
-        elif optimize_lattice:
+        else:  # Covalent radii based lattice constant optimization:
             # Scale fixed lattice points
             opt_atoms_list = []
             opt_cell_parameters = []
@@ -306,9 +305,10 @@ class CellParameters(WyckoffSymmetries):
             upper_bound += [(50 * self.natoms) ** (1/3)
                             for i in self.lattice_variables]
 
+        niter = self.swarm_options.get('niter') or niter
         n_parameters = len(feature_variables)
-
-        n_particles = self.swarm_options.get('n_particles') or 4 * n_parameters
+        n_particles = self.swarm_options.get(
+            'n_particles') * n_parameters or 4 * n_parameters
         topology = self.swarm_options.get('topology') or Ring()
         bounds = (np.array(lower_bound), np.array(upper_bound))
 
@@ -355,9 +355,9 @@ class CellParameters(WyckoffSymmetries):
         stats = optimizer.optimize(get_loss_for_param, iters=niter)
 
         coor = {}
-        coor[feature_variables[0]] = stats[1][0]
+        for n in range(len(feature_variables)):
+            coor[feature_variables[n]] = stats[1][n]
         cell_parameters.update(coor)
-
         atoms = self.construct_atoms(cell_parameters)
 
         if not optimize_lattice:
