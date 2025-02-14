@@ -15,6 +15,7 @@ class SpglibInterface:
                                                 atoms.get_scaled_positions(),
                                                 atoms.get_atomic_numbers()),
                                                symprec=tolerance)
+
         self.tolerance = tolerance
         self.spacegroup = self.spglibdata['number']
 
@@ -41,10 +42,13 @@ class SpglibInterface:
     def get_primitive_atoms(self, atoms):
         """Transform to primitive cell"""
 
-        lattice, scaled_positions, numbers = standardize_cell(atoms,
+        lattice, scaled_positions, numbers = standardize_cell((atoms.get_cell(),
+                                                                atoms.get_scaled_positions(),
+                                                                atoms.get_atomic_numbers()),
                                                               to_primitive=True,
                                                               no_idealize=True,
                                                               symprec=1e-5)
+
 
         atoms = Atoms(numbers=numbers,
                       cell=lattice,

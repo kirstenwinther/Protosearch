@@ -10,9 +10,11 @@ import pandas as pd
 from protosearch.utils.data import metal_numbers
 from protosearch.workflow.prototype_db import PrototypeSQL
 from protosearch import build_bulk
-from .fitness_function import get_connections
+from .connectivity_tools import get_connections
 from .spglib_interface import SpglibInterface
 from .cell_parameters import CellParameters
+from pymatgen.analysis.structure_matcher import StructureMatcher
+from pymatgen.io.ase import AseAtomsAdaptor
 
 
 path = build_bulk.__path__[0]
@@ -195,7 +197,7 @@ class OqmdInterface:
                 continue
 
             atoms_sub_list = self.substitute_atoms(atoms, symbols0)
-            graphs = []
+            #graphs = []
             for atoms in atoms_sub_list:
                 new_symbols = atoms.get_chemical_symbols()
                 new_species = old_species.copy()
@@ -205,7 +207,8 @@ class OqmdInterface:
                     if idx:
                         new_species[idx] = [new_symbols[i]] * len(idx)
 
-                graphs += [get_connections(atoms, decimals=1)]
+                #graphs += [get_connections(atoms, decimals=1)]
+
                 # Get spacegroup and conventional atoms
                 SPG = SpglibInterface(atoms)
                 atoms = SPG.get_conventional_atoms()
@@ -214,7 +217,7 @@ class OqmdInterface:
                 structure_name = str(spacegroup)
                 for spec, wy_spec in zip(new_species, s.data['wyckoffs']):
                     structure_name += '_{}_{}'.format(spec, wy_spec)
-
+                #print(structure_name)
                 # Set new lattice constants
                 CP = CellParameters(spacegroup=spacegroup)
                 atoms = CP.optimize_lattice_constants(atoms,
@@ -237,10 +240,10 @@ class OqmdInterface:
                 break
 
 
-        indices = [i for i in range(len(atoms_data))
-                   if not np.any(graphs[i] in graphs[:i])]
+        #indices = [i for i in range(len(atoms_data))
+        #           if not np.any(graphs[i] in graphs[:i])]
 
-        atoms_data = [atoms_data[i] for i in indices]
+        #atoms_data = [atoms_data[i] for i in indices]
 
         return atoms_data
 
@@ -295,6 +298,7 @@ class OqmdInterface:
             atoms_temp.set_chemical_symbols(chemical_symbols)
             atoms_list += [atoms_temp.copy()]
 
+        atoms_list = filter_match(atoms_list)
         return atoms_list
 
     def ase_db(self):
@@ -353,6 +357,28 @@ class OqmdInterface:
             prototypes += [p[0] for p in prototypes_rep]
 
         return prototypes
+
+
+def filter_match(atoms_list):
+    if len(atoms_list) == 1:
+        return atoms_list
+
+    atoms_list_filtered = []
+    N = len(atoms_list)
+
+    for i, atoms1 in enumerate(atoms_list):
+        is_match = False
+        for j, atoms2 in enumerate(atoms_list[i+1:]):
+            structure1 = AseAtomsAdaptor.get_structure(atoms1)
+            structure2 = AseAtomsAdaptor.get_structure(atoms2)
+
+            if StructureMatcher().fit(structure1, structure2, symmetric=True):
+                is_match = True
+                #print('match!')
+
+        if not is_match:
+            atoms_list_filtered += [atoms_list[i]]
+    return atoms_list_filtered
 
 
 def get_stoich_formula(formula, return_elements=True):
